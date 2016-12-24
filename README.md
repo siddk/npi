@@ -1,2 +1,2 @@
-# npi
-Neural Programmer-Interpreter Implementation, in Tensorflow
+# Neural Programmer-Interpreters
+Neural Programmer-Interpreter Implementation, in Tensorflow (with TFLearn)
