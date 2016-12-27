@@ -29,6 +29,12 @@ class NPI():
         self.num_progs, self.key_dim = config["PROGRAM_NUM"], config["PROGRAM_KEY_SIZE"]
         self.log_path, self.verbose = log_path, verbose
 
+        # Setup Label Placeholders
+        self.y_term = tf.placeholder(tf.float32, shape=[None, 1], name='Termination_Y')
+        self.y_prog = tf.placeholder(tf.int64, shape=[None], name='Program_Y')
+        self.y_args = [tf.placeholder(tf.int64, shape=[None], name='Arg{}_Y'.format(str(i))) for
+                       i in range(self.num_args)]
+
         # Build NPI LSTM Core, hidden state
         self.reset_state()
         self.h = self.npi_core()
@@ -42,22 +48,38 @@ class NPI():
         # Build Argument Networks => Generates list of argument distributions
         self.arguments = self.argument_net()
 
-        # Build Regressions
-        self.t_reg, self.p_reg, self.a_regs = self.loss()
+        # Build Losses
+        self.t_loss, self.p_loss, self.a_losses = self.build_losses()
+        self.losses = [self.t_loss, self.p_loss] + self.a_losses
 
-        # Compile Model
-        outputs = tflearn.merge_outputs([self.t_reg, self.p_reg] + self.a_regs)
-        self.network = tflearn.DNN(outputs, tensorboard_dir=self.log_path,
-                                   tensorboard_verbose=self.verbose,
-                                   checkpoint_path=os.path.join(self.log_path, 'model.ckpt'))
+        # Build Optimizer
+        self.opt = tf.train.AdamOptimizer(learning_rate=.0001)
+
+        # Build Metrics
+        self.t_metric, self.p_metric, self.a_metrics = self.build_metrics()
+        self.metrics = [self.t_metric, self.p_metric] + self.a_metrics
+
+        # Build Train Ops
+        self.train_ops = [tflearn.TrainOp(self.losses[i], self.opt, metric=self.metrics[i],
+                                          batch_size=self.bsz) for i in range(len(self.losses))]
+
+        # Build Separate Trainers (for Arguments, and for Default (no arguments))
+        self.default_trainer = tflearn.Trainer(self.train_ops[:2], tensorboard_dir=self.log_path,
+                                               tensorboard_verbose=self.verbose,
+                                               checkpoint_path=os.path.join(self.log_path,
+                                                                            'model.ckpt'))
+        self.argument_trainer = tflearn.Trainer(self.train_ops, tensorboard_dir=self.log_path,
+                                                tensorboard_verbose=self.verbose,
+                                                checkpoint_path=os.path.join(self.log_path,
+                                                                             'model.ckpt'))
 
     def reset_state(self):
         """
         Zero NPI Core LSTM Hidden States. LSTM States are represented as a Tuple, consisting of the
         LSTM C State, and the LSTM H State (in that order: (c, h)).
         """
-        zero_state = np.zeros((self.bsz, self.npi_core_dim))
-        self.h_states = [(zero_state, zero_state) for _ in range(self.npi_core_layers)]
+        zero_state = tf.zeros([self.bsz, 2 * self.npi_core_dim])
+        self.h_states = [zero_state for _ in range(self.npi_core_layers)]
 
     def npi_core(self):
         """
@@ -66,22 +88,23 @@ class NPI():
 
         References: Reed, de Freitas [2]
         """
-        s_in = self.state_dim                                    # Shape: [bsz, state_dim]
+        s_in = self.state_encoding                               # Shape: [bsz, state_dim]
         p_in = self.program_embedding                            # Shape: [bsz, 1, program_dim]
 
         # Reshape state_in
-        s_in = tflearn.reshape(s_in, [None, 1, self.state_dim])  # Shape: [bsz, 1, state_dim]
+        s_in = tflearn.reshape(s_in, [-1, 1, self.state_dim])  # Shape: [bsz, 1, state_dim]
 
         # Concatenate s_in, p_in
         c = tflearn.merge([s_in, p_in], 'concat', axis=2)        # Shape: [bsz, 1, state + prog]
 
         # Feed through Multi-Layer LSTM
-        for i in range(len(self.npi_core_layers)):
-            c, self.h_states[i] = tflearn.lstm(c, self.npi_core_dim, return_seq=True,
-                                               initial_state=self.h_states[i], return_states=True)
+        for i in range(self.npi_core_layers):
+            c, [self.h_states[i]] = tflearn.lstm(c, self.npi_core_dim, return_seq=True,
+                                                 initial_state=self.h_states[i], return_states=True)
 
         # Return Top-Most LSTM H-State
-        return self.h_states[-1][1]                              # Shape: [bsz, npi_core_dim]
+        top_state = tf.split(1, 2, self.h_states[-1])[1]
+        return top_state                                         # Shape: [bsz, npi_core_dim]
 
     def terminate_net(self):
         """
@@ -90,7 +113,7 @@ class NPI():
 
         References: Reed, de Freitas [3]
         """
-        p_terminate = tflearn.fully_connected(self.h, 1, activation='sigmoid', regularizer='L2')
+        p_terminate = tflearn.fully_connected(self.h, 1, activation='linear', regularizer='L2')
         return p_terminate                                      # Shape: [bsz, 1]
 
     def key_net(self):
@@ -105,11 +128,10 @@ class NPI():
         key = tflearn.fully_connected(hidden, self.key_dim)    # Shape: [bsz, key_dim]
 
         # Perform dot product operation, then softmax over all options to generate distribution
-        key = tflearn.reshape(key, [None, 1, self.key_dim])
+        key = tflearn.reshape(key, [-1, 1, self.key_dim])
         key = tf.tile(key, [1, self.num_progs, 1])             # Shape: [bsz, n_progs, key_dim]
         prog_sim = tf.mul(key, self.core.program_key)          # Shape: [bsz, n_progs, key_dim]
-        prog_sim = tf.reduce_sum(prog_sim, [2])                # Shape: [bsz, n_progs]
-        prog_dist = tflearn.activation(prog_sim, 'softmax')
+        prog_dist = tf.reduce_sum(prog_sim, [2])               # Shape: [bsz, n_progs]
         return prog_dist
 
     def argument_net(self):
@@ -121,27 +143,48 @@ class NPI():
         """
         args = []
         for i in range(self.num_args):
-            arg = tflearn.fully_connected(self.h, self.arg_depth, activation='softmax',
+            arg = tflearn.fully_connected(self.h, self.arg_depth, activation='linear',
                                           regularizer='L2', name='Argument_{}'.format(str(i)))
             args.append(arg)
         return args                                             # Shape: [bsz, arg_depth]
 
-    def loss(self):
+    def build_losses(self):
         """
-        Build separate output regressions, with the necessary loss functions.
+        Build separate loss computations, using the logits from each of the sub-networks.
         """
-        # Termination Regression
-        t_reg = tflearn.regression(self.terminate, loss='binary_crossentropy', batch_size=self.bsz,
-                                   name='Termination_Out')
+        # Termination Network Loss
+        termination_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(self.terminate,
+                                                                                  self.y_term),
+                                          name='Termination_Network_Loss')
 
-        # Program Regression
-        p_reg = tflearn.regression(self.program_distribution, batch_size=self.bsz,
-                                   name='Program_Out')
+        # Program Network Loss
+        program_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
+            self.program_distribution, self.y_prog), name='Program_Network_Loss')
 
-        # Argument Regressions
-        arg_regs = []
-        for i in range(len(self.arguments)):
-            arg_regs.append(tflearn.regression(self.arguments[i], batch_size=self.bsz,
-                                               name='Argument{}_Out'.format(str(i))))
+        # Argument Network Losses
+        arg_losses = []
+        for i in range(self.num_args):
+            arg_losses.append(tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
+                self.arguments[i], self.y_args[i]), name='Argument{}_Network_Loss'.format(str(i))))
 
-        return t_reg, p_reg, arg_regs
+        return termination_loss, program_loss, arg_losses
+
+    def build_metrics(self):
+        """
+        Build accuracy metrics for each of the sub-networks.
+        """
+        term_metric = tf.reduce_mean(tf.cast(tf.equal(tf.round(self.terminate),
+                                                      tf.round(self.y_term)),
+                                             tf.float32), name='Termination_Accuracy')
+
+        program_metric = tf.reduce_mean(tf.cast(tf.equal(tf.argmax(self.program_distribution, 1),
+                                                         self.y_prog),
+                                                tf.float32), name='Program_Accuracy')
+
+        arg_metrics = []
+        for i in range(self.num_args):
+            arg_metrics.append(tf.reduce_mean(
+                tf.cast(tf.equal(tf.argmax(self.arguments[i], 1), self.y_args[i]), tf.float32),
+                name='Argument{}_Accuracy'.format(str(i))))
+
+        return term_metric, program_metric, arg_metrics

@@ -20,13 +20,13 @@ class AdditionCore():
         self.program_dim = CONFIG["PROGRAM_EMBEDDING_SIZE"]
 
         # Setup Environment Input Layer
-        self.env_in = tflearn.input_data([self.bsz, self.env_dim], dtype=tf.int32, name="Env_Input")
+        self.env_in = tf.placeholder(tf.float32, shape=[self.bsz, self.env_dim], name="Env_Input")
 
         # Setup Argument Input Layer
-        self.arg_in = tflearn.input_data([self.bsz, self.arg_dim], dtype=tf.int32, name="Arg_Input")
+        self.arg_in = tf.placeholder(tf.float32, shape=[self.bsz, self.arg_dim], name="Arg_Input")
 
         # Setup Program ID Input Layer
-        self.prg_in = tflearn.input_data([self.bsz, 1], dtype=tf.int32, name='Program_ID')
+        self.prg_in = tf.placeholder(tf.int32, shape=[self.bsz, 1], name='Program_ID')
 
         # Build Environment Encoder Network (f_enc)
         self.state_encoding = self.build_encoder()
