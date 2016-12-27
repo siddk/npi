@@ -31,7 +31,10 @@ class AdditionCore():
         # Build Environment Encoder Network (f_enc)
         self.state_encoding = self.build_encoder()
 
-        # Build Program Matrix
+        # Build Program Matrices
+        self.program_key = tflearn.variable(name='Program_Keys', shape=[CONFIG["PROGRAM_NUM"],
+                                                                        CONFIG["PROGRAM_KEY_SIZE"]],
+                                            initializer='truncated_normal')
         self.program_embedding = self.build_program_store()
 
     def build_encoder(self):
