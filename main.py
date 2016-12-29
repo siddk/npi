@@ -14,7 +14,7 @@ tf.app.flags.DEFINE_integer("num_training", 500, "Number of training examples to
 tf.app.flags.DEFINE_integer("num_test", 50, "Number of test examples to generate.")
 
 tf.app.flags.DEFINE_boolean("do_train", True, "Boolean whether to continue training model.")
-tf.app.flags.DEFINE_integer("num_epochs", 1, "Number of training epochs to perform.")
+tf.app.flags.DEFINE_integer("num_epochs", 5, "Number of training epochs to perform.")
 
 
 def main(_):
@@ -31,3 +31,4 @@ def main(_):
 
 if __name__ == "__main__":
     tf.app.run()
+    

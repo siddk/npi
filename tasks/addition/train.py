@@ -8,6 +8,8 @@ from model.npi import NPI
 from tasks.addition.addition import AdditionCore
 from tasks.addition.env.config import CONFIG, get_args, ScratchPad
 import pickle
+import sys
+import tensorflow as tf
 
 MOVE_PID, WRITE_PID = 0, 1
 WRITE_OUT, WRITE_CARRY = 0, 1
@@ -35,6 +37,13 @@ def train_addition(epochs, verbose=0):
     print 'Initializing NPI Model!'
     npi = NPI(core, CONFIG, LOG_PATH, verbose=verbose)
 
+    # Initialize TF Saver
+    saver = tf.train.Saver()
+
+    # Initialize TF Session
+    sess = tf.Session()
+    sess.run(tf.initialize_all_variables())
+
     # Start Training
     for ep in range(1, epochs + 1):
         for i in range(len(data)):
@@ -47,6 +56,7 @@ def train_addition(epochs, verbose=0):
             x, y = steps[:-1], steps[1:]
 
             # Run through steps, and fit!
+            step_def_loss, step_arg_loss, term_acc, prog_acc, arg0_acc, arg1_acc, arg2_acc = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
             for j in range(len(x)):
                 (prog_name, prog_in_id), arg, term = x[j]
                 (_, prog_out_id), arg_out, term_out = y[j]
@@ -63,13 +73,26 @@ def train_addition(epochs, verbose=0):
 
                 # Fit!
                 if prog_out_id == MOVE_PID or prog_out_id == WRITE_PID:
-                    npi.argument_trainer.fit([{npi.env_in: env_in, npi.arg_in: arg_in,
-                                              npi.prg_in: prog_in, npi.y_args[0]: arg_out[0],
-                                              npi.y_args[1]: arg_out[1], npi.y_args[2]: arg_out[2],
-                                              npi.y_prog: prog_out, npi.y_term: term_out}] * 5,
-                                             n_epoch=1, snapshot_epoch=False)
+                    loss, t_acc, p_acc, a_acc, _ = sess.run(
+                        [npi.arg_loss, npi.t_metric, npi.p_metric, npi.a_metrics, npi.arg_train_op],
+                        feed_dict={npi.env_in: env_in, npi.arg_in: arg_in, npi.prg_in: prog_in,
+                                   npi.y_prog: prog_out, npi.y_term: term_out,
+                                   npi.y_args[0]: [arg_out[0]], npi.y_args[1]: [arg_out[1]],
+                                   npi.y_args[2]: [arg_out[2]]})
+                    step_arg_loss += loss
+                    term_acc += t_acc
+                    prog_acc += p_acc
+                    arg0_acc += a_acc[0]
+                    arg1_acc += a_acc[1]
+                    arg2_acc += a_acc[2]
                 else:
-                    npi.default_trainer.fit([{npi.env_in: env_in, npi.arg_in: arg_in,
-                                             npi.prg_in: prog_in, npi.y_prog: prog_out,
-                                             npi.y_term: term_out}] * 2, n_epoch=1,
-                                            snapshot_epoch=False)
+                    loss, t_acc, p_acc, _ = sess.run(
+                        [npi.default_loss, npi.t_metric, npi.p_metric, npi.default_train_op],
+                        feed_dict={npi.env_in: env_in, npi.arg_in: arg_in, npi.prg_in: prog_in,
+                                   npi.y_prog: prog_out, npi.y_term: term_out})
+                    step_def_loss += loss
+                    term_acc += t_acc
+                    prog_acc += p_acc
+
+            print "Epoch {0:02d} Step {1:03d} Default Step Loss {2:05f}, Argument Step Loss {3:05f}, Term: {4:03f}, Prog: {5:03f}, A0: {6:03f}, A1: {7:03f}, A2: {8:03}"\
+                .format(ep, i, step_def_loss / len(x), step_arg_loss / len(x), term_acc / len(x), prog_acc / len(x), arg0_acc / len(x), arg1_acc / len(x), arg2_acc / len(x))

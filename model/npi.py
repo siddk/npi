@@ -1,9 +1,7 @@
 """
 npi.py
-
 Core model definition script for the Neural Programmer-Interpreter.
 """
-import numpy as np
 import os
 import tensorflow as tf
 import tflearn
@@ -32,8 +30,8 @@ class NPI():
         # Setup Label Placeholders
         self.y_term = tf.placeholder(tf.float32, shape=[None, 1], name='Termination_Y')
         self.y_prog = tf.placeholder(tf.int64, shape=[None], name='Program_Y')
-        self.y_args = [tf.placeholder(tf.int64, shape=[None], name='Arg{}_Y'.format(str(i))) for
-                       i in range(self.num_args)]
+        self.y_args = [tf.placeholder(tf.int64, shape=[None, self.arg_depth],
+                                      name='Arg{}_Y'.format(str(i))) for i in range(self.num_args)]
 
         # Build NPI LSTM Core, hidden state
         self.reset_state()
@@ -50,7 +48,8 @@ class NPI():
 
         # Build Losses
         self.t_loss, self.p_loss, self.a_losses = self.build_losses()
-        self.losses = [self.t_loss, self.p_loss] + self.a_losses
+        self.default_loss = self.t_loss + self.p_loss
+        self.arg_loss = sum([self.t_loss, self.p_loss] + self.a_losses)
 
         # Build Optimizer
         self.opt = tf.train.AdamOptimizer(learning_rate=.0001)
@@ -60,18 +59,8 @@ class NPI():
         self.metrics = [self.t_metric, self.p_metric] + self.a_metrics
 
         # Build Train Ops
-        self.train_ops = [tflearn.TrainOp(self.losses[i], self.opt, metric=self.metrics[i],
-                                          batch_size=self.bsz) for i in range(len(self.losses))]
-
-        # Build Separate Trainers (for Arguments, and for Default (no arguments))
-        self.default_trainer = tflearn.Trainer(self.train_ops[:2], tensorboard_dir=self.log_path,
-                                               tensorboard_verbose=self.verbose,
-                                               checkpoint_path=os.path.join(self.log_path,
-                                                                            'model.ckpt'))
-        self.argument_trainer = tflearn.Trainer(self.train_ops, tensorboard_dir=self.log_path,
-                                                tensorboard_verbose=self.verbose,
-                                                checkpoint_path=os.path.join(self.log_path,
-                                                                             'model.ckpt'))
+        self.default_train_op = self.opt.minimize(self.default_loss)
+        self.arg_train_op = self.opt.minimize(self.arg_loss)
 
     def reset_state(self):
         """
@@ -92,7 +81,7 @@ class NPI():
         p_in = self.program_embedding                            # Shape: [bsz, 1, program_dim]
 
         # Reshape state_in
-        s_in = tflearn.reshape(s_in, [-1, 1, self.state_dim])  # Shape: [bsz, 1, state_dim]
+        s_in = tflearn.reshape(s_in, [-1, 1, self.state_dim])    # Shape: [bsz, 1, state_dim]
 
         # Concatenate s_in, p_in
         c = tflearn.merge([s_in, p_in], 'concat', axis=2)        # Shape: [bsz, 1, state + prog]
@@ -164,7 +153,7 @@ class NPI():
         # Argument Network Losses
         arg_losses = []
         for i in range(self.num_args):
-            arg_losses.append(tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
+            arg_losses.append(tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
                 self.arguments[i], self.y_args[i]), name='Argument{}_Network_Loss'.format(str(i))))
 
         return termination_loss, program_loss, arg_losses
