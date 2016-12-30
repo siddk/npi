@@ -60,7 +60,7 @@ def repl(session, npi, data):
         scratch = ScratchPad(x, y)
         prog_name, prog_id, arg, term = 'ADD', 2, [], False
 
-        cont = raw_input('[C]ontinue? ')
+        cont = 'c'
         while cont == 'c' or cont == 'C':
             # Print Step Output
             if prog_id == MOVE_PID:
@@ -91,7 +91,19 @@ def repl(session, npi, data):
                                          feed_dict={npi.env_in: env_in, npi.arg_in: arg_in,
                                                     npi.prg_in: prog_in})
 
-            if np.argmax(t) == 1 or ((prog_id in {MOVE_PID, WRITE_PID}) and scratch.done()):
+            if np.argmax(t) == 1:
+                print 'Step: %s, Arguments: %s, Terminate: %s' % (prog_name, a_str, str(True))
+                print 'IN 1: %s, IN 2: %s, CARRY: %s, OUT: %s' % (scratch.in1_ptr[1],
+                                                                  scratch.in2_ptr[1],
+                                                                  scratch.carry_ptr[1],
+                                                                  scratch.out_ptr[1])
+                # Update Environment if MOVE or WRITE
+                if prog_id == MOVE_PID or prog_id == WRITE_PID:
+                    scratch.execute(prog_id, arg)
+
+                # Print Environment
+                scratch.pretty_print()
+
                 output = int("".join(map(str, map(int, scratch[3]))))
                 print "Model Output: %s + %s = %s" % (str(x), str(y), str(output))
                 print "Correct Out : %s + %s = %s" % (str(x), str(y), str(x + y))
