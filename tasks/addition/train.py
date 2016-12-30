@@ -8,7 +8,6 @@ from model.npi import NPI
 from tasks.addition.addition import AdditionCore
 from tasks.addition.env.config import CONFIG, get_args, ScratchPad
 import pickle
-import sys
 import tensorflow as tf
 
 MOVE_PID, WRITE_PID = 0, 1
@@ -56,7 +55,8 @@ def train_addition(epochs, verbose=0):
             x, y = steps[:-1], steps[1:]
 
             # Run through steps, and fit!
-            step_def_loss, step_arg_loss, term_acc, prog_acc, arg0_acc, arg1_acc, arg2_acc = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            step_def_loss, step_arg_loss, term_acc, prog_acc, = 0.0, 0.0, 0.0, 0.0
+            arg0_acc, arg1_acc, arg2_acc, num_args = 0.0, 0.0, 0.0, 0
             for j in range(len(x)):
                 (prog_name, prog_in_id), arg, term = x[j]
                 (_, prog_out_id), arg_out, term_out = y[j]
@@ -69,7 +69,7 @@ def train_addition(epochs, verbose=0):
                 env_in = [scratch.get_env()]
                 arg_in, arg_out = [get_args(arg, arg_in=True)], get_args(arg_out, arg_in=False)
                 prog_in, prog_out = [[prog_in_id]], [prog_out_id]
-                term_out = [[1]] if term_out else [[0]]
+                term_out = [1] if term_out else [0]
 
                 # Fit!
                 if prog_out_id == MOVE_PID or prog_out_id == WRITE_PID:
@@ -85,6 +85,7 @@ def train_addition(epochs, verbose=0):
                     arg0_acc += a_acc[0]
                     arg1_acc += a_acc[1]
                     arg2_acc += a_acc[2]
+                    num_args += 1
                 else:
                     loss, t_acc, p_acc, _ = sess.run(
                         [npi.default_loss, npi.t_metric, npi.p_metric, npi.default_train_op],
@@ -94,5 +95,12 @@ def train_addition(epochs, verbose=0):
                     term_acc += t_acc
                     prog_acc += p_acc
 
-            print "Epoch {0:02d} Step {1:03d} Default Step Loss {2:05f}, Argument Step Loss {3:05f}, Term: {4:03f}, Prog: {5:03f}, A0: {6:03f}, A1: {7:03f}, A2: {8:03}"\
-                .format(ep, i, step_def_loss / len(x), step_arg_loss / len(x), term_acc / len(x), prog_acc / len(x), arg0_acc / len(x), arg1_acc / len(x), arg2_acc / len(x))
+            print "Epoch {0:02d} Step {1:03d} Default Step Loss {2:05f}, " \
+                  "Argument Step Loss {3:05f}, Term: {4:03f}, Prog: {5:03f}, A0: {6:03f}, " \
+                  "A1: {7:03f}, A2: {8:03}"\
+                .format(ep, i, step_def_loss / len(x), step_arg_loss / len(x), term_acc / len(x),
+                        prog_acc / len(x), arg0_acc / num_args, arg1_acc / num_args,
+                        arg2_acc / num_args)
+
+        # Save Model
+        saver.save(sess, 'tasks/addition/log/model.ckpt')

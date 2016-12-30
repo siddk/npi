@@ -2,7 +2,6 @@
 npi.py
 Core model definition script for the Neural Programmer-Interpreter.
 """
-import os
 import tensorflow as tf
 import tflearn
 
@@ -28,7 +27,7 @@ class NPI():
         self.log_path, self.verbose = log_path, verbose
 
         # Setup Label Placeholders
-        self.y_term = tf.placeholder(tf.float32, shape=[None, 1], name='Termination_Y')
+        self.y_term = tf.placeholder(tf.int64, shape=[None], name='Termination_Y')
         self.y_prog = tf.placeholder(tf.int64, shape=[None], name='Program_Y')
         self.y_args = [tf.placeholder(tf.int64, shape=[None, self.arg_depth],
                                       name='Arg{}_Y'.format(str(i))) for i in range(self.num_args)]
@@ -48,19 +47,22 @@ class NPI():
 
         # Build Losses
         self.t_loss, self.p_loss, self.a_losses = self.build_losses()
-        self.default_loss = self.t_loss + self.p_loss
-        self.arg_loss = sum([self.t_loss, self.p_loss] + self.a_losses)
+        self.default_loss = 2 * self.t_loss + self.p_loss
+        self.arg_loss = 0.25 * sum([self.t_loss, self.p_loss]) + sum(self.a_losses)
 
         # Build Optimizer
-        self.opt = tf.train.AdamOptimizer(learning_rate=.0001)
+        self.global_step = tf.Variable(0, trainable=False)
+        self.learning_rate = tf.train.exponential_decay(0.0001, self.global_step, 10000, 0.95,
+                                                        staircase=True)
+        self.opt = tf.train.AdamOptimizer(learning_rate=self.learning_rate)
 
         # Build Metrics
         self.t_metric, self.p_metric, self.a_metrics = self.build_metrics()
         self.metrics = [self.t_metric, self.p_metric] + self.a_metrics
 
         # Build Train Ops
-        self.default_train_op = self.opt.minimize(self.default_loss)
-        self.arg_train_op = self.opt.minimize(self.arg_loss)
+        self.default_train_op = self.opt.minimize(self.default_loss, global_step=self.global_step)
+        self.arg_train_op = self.opt.minimize(self.arg_loss, global_step=self.global_step)
 
     def reset_state(self):
         """
@@ -102,8 +104,8 @@ class NPI():
 
         References: Reed, de Freitas [3]
         """
-        p_terminate = tflearn.fully_connected(self.h, 1, activation='linear', regularizer='L2')
-        return p_terminate                                      # Shape: [bsz, 1]
+        p_terminate = tflearn.fully_connected(self.h, 2, activation='linear', regularizer='L2')
+        return p_terminate                                      # Shape: [bsz, 2]
 
     def key_net(self):
         """
@@ -142,9 +144,8 @@ class NPI():
         Build separate loss computations, using the logits from each of the sub-networks.
         """
         # Termination Network Loss
-        termination_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(self.terminate,
-                                                                                  self.y_term),
-                                          name='Termination_Network_Loss')
+        termination_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
+            self.terminate, self.y_term), name='Termination_Network_Loss')
 
         # Program Network Loss
         program_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(
@@ -162,8 +163,8 @@ class NPI():
         """
         Build accuracy metrics for each of the sub-networks.
         """
-        term_metric = tf.reduce_mean(tf.cast(tf.equal(tf.round(self.terminate),
-                                                      tf.round(self.y_term)),
+        term_metric = tf.reduce_mean(tf.cast(tf.equal(tf.argmax(self.terminate, 1),
+                                                      self.y_term),
                                              tf.float32), name='Termination_Accuracy')
 
         program_metric = tf.reduce_mean(tf.cast(tf.equal(tf.argmax(self.program_distribution, 1),
@@ -173,7 +174,7 @@ class NPI():
         arg_metrics = []
         for i in range(self.num_args):
             arg_metrics.append(tf.reduce_mean(
-                tf.cast(tf.equal(tf.argmax(self.arguments[i], 1), self.y_args[i]), tf.float32),
-                name='Argument{}_Accuracy'.format(str(i))))
+                tf.cast(tf.equal(tf.argmax(self.arguments[i], 1), tf.argmax(self.y_args[i], 1)),
+                        tf.float32), name='Argument{}_Accuracy'.format(str(i))))
 
         return term_metric, program_metric, arg_metrics
