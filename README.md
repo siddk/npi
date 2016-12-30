@@ -8,24 +8,24 @@ Neural Programmer-Interpreter Implementation, in Tensorflow (with TFLearn). Base
 A Neural Programmer-Interpreter can be decomposed into the following components (each of which are
 implemented either in `npi.py`, or `[task-name].py`:
 
-+ Neural Programmer-Interpreter Core: Simple LSTM Network (f_lstm), with hidden states h_t, c_t
++ **Neural Programmer-Interpreter Core**: Simple LSTM Network (**f_lstm**), with hidden states *h_t*, *c_t*
     - Behaves like a traffic controller ==> Based on task-specific encoder inputs, serves as a 
       router, outputting high-dimensional information that encodes information about which 
       subroutine to call next, and with what arguments.
     - Shared across all tasks ==> only shared, central component.
 
-+ Task-Specific Encoder Network: Architecture depends on specific task, but can also be trained 
-                                 via gradient descent (f_enc). 
++ **Task-Specific Encoder Network**: Architecture depends on specific task, but can also be trained 
+                                 via gradient descent (**f_enc**). 
     - Given the task environment, and previous subroutine arguments, generates a fixed-length 
       state encoding s_t
 
-+ Program Termination Network: Feed-Forward Network (fend), takes LSTM Controller hidden state 
-                               h_t and outputs a probability of terminating execution.
++ **Program Termination Network**: Feed-Forward Network (**f_end**), takes LSTM Controller hidden state 
+                               *h_t* and outputs a probability of terminating execution.
     - Paper uses a threshold value of 0.5 to determine whether to stop, and terminate, or 
       call next subroutine.
 
-+ Subroutine Lookup Network: Feed-Forward Network (f_prog), takes LSTM Controller hidden state 
-                             h_t and outputs a key embedding k_t to look up next subroutine to 
++ **Subroutine Lookup Network**: Feed-Forward Network (**f_prog**), takes LSTM Controller hidden state 
+                             *h_t* and outputs a key embedding *k_t* to look up next subroutine to 
                              be called.
     - Subroutine information is stored in two matrices, M_key (N x K), and M_prog (N x P), where 
       each of the N rows denotes a different subroutine, and where K and P are the 
@@ -38,7 +38,7 @@ implemented either in `npi.py`, or `[task-name].py`:
             softmax over the array of cosine similarities, and used those as my next-program
             probabilities.
 
-+ Argument Networks: Feed-Forward Networks (f_arg), takes LSTM Controller hidden state h_t and 
++ **Argument Networks**: Feed-Forward Networks (**f_arg**), takes LSTM Controller hidden state h_t and 
                      outputs subroutine arguments a_(t + 1).
     - Note: In this implementation, I built separate networks for each of the three arguments.
         
