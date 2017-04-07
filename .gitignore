@@ -6,9 +6,11 @@ __pycache__/
 # C extensions
 *.so
 
+# MAC OS
+.DS_Store
+.vscode/
 # Distribution / packaging
 .Python
-env/
 build/
 develop-eggs/
 dist/
