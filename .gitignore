@@ -9,6 +9,7 @@ __pycache__/
 # MAC OS
 .DS_Store
 .vscode/
+
 # Distribution / packaging
 .Python
 build/
@@ -79,10 +80,6 @@ celerybeat-schedule
 
 # dotenv
 .env
-
-# virtualenv
-venv/
-ENV/
 
 # Spyder project settings
 .spyderproject
